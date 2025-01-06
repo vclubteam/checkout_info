@@ -1,16 +1,29 @@
 import re
 import logging
 import aiohttp
+import os
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 import time
 
-BOT_TOKEN = "7566387561:AAFxE7iIOBF5n6cl01zikhfAguSEXTM9JG8"  # Add your bot token here
-API_ID = 24509589         # Add your API ID here
-API_HASH = "717cf21d94c4934bcbe1eaa1ad86ae75"  # Add your API hash here
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
-app = Client("my_bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
+# Load environment variables
+load_dotenv()
+
+# Bot configuration
+app = Client(
+    "my_bot",
+    bot_token=os.getenv('BOT_TOKEN'),
+    api_id=os.getenv('API_ID'),
+    api_hash=os.getenv('API_HASH')
+)
 
 class StripeCheckoutInfo:
     def __init__(self, url, pk, urlx, response_data, site_name, business_url, payment_mode):
@@ -35,17 +48,19 @@ class StripeCheckoutInfo:
     @staticmethod
     async def get_stripe_pk(url):
         try:
+            # Extract base domain for business URL
+            match = re.match(r'https?://([^/]+)', url)
+            base_domain = match.group(1) if match else None
             site_name = "Unknown Site"
-            business_url = "Not Available"
+            business_url = f"https://{base_domain}" if base_domain else "Not Available"
             payment_mode = "Not Available"
             
             if "stripe" in url:
-                site_name = "Stripe"
-                business_url = "https://stripe.com"
-                payment_mode = "subscription"  # You can modify this part based on the type of payment mode you want to identify
+                site_name = base_domain or "Stripe Checkout"
+                payment_mode = "subscription"
 
             async with async_playwright() as p:
-                browser = await p.chromium.launch()
+                browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
                 pk = urlx = None
 
@@ -99,55 +114,59 @@ class StripeCheckoutInfo:
     def get_customer_email(self):
         email = self.response_data.get('customer_email')
         if not email:
-            line_item_group = self.response_data.get('line_item_group', {})
-            line_items = line_item_group.get('line_items', [])
+            line_item_group = self.response_data.get('line_item_group')
+            line_items = line_item_group.get('line_items', []) if line_item_group else []
             if isinstance(line_items, list) and len(line_items) > 0:
                 name = line_items[0].get('name', '')
                 match = re.search(r'[\w\.-]+@[\w\.-]+', name)
                 if match:
                     email = match.group(0)
-        if not email:
-            email = 'Email not found'
-        return email
+        return email or 'Email not found'
 
     def get_checkout_session(self):
-        session_id = self.response_data.get('session_id', 'Not Available')
-        return session_id
+        return self.response_data.get('session_id', 'Not Available')
 
     def get_checkout_currency(self):
-        currency = self.response_data.get('currency', 'Currency not found')
-        return currency
+        return self.response_data.get('currency', 'Currency not found')
 
     def get_amount_due(self):
         amount_due = None
+        
+        # Try to get amount from invoice
         invoice = self.response_data.get('invoice')
-        if invoice and isinstance(invoice, dict):
+        if isinstance(invoice, dict):
             amount_due = invoice.get('amount_due')
+            
+        # Try to get amount from payment intent
         if amount_due is None:
             payment_intent = self.response_data.get('payment_intent')
-            if payment_intent and isinstance(payment_intent, dict):
+            if isinstance(payment_intent, dict):
                 amount_due = payment_intent.get('amount')
+                
+        # Try to get amount from line item group
         if amount_due is None:
             line_item_group = self.response_data.get('line_item_group')
-            if line_item_group and isinstance(line_item_group, dict):
+            if isinstance(line_item_group, dict):
                 amount_due = line_item_group.get('total')
+                
+        # Convert amount to decimal if it's an integer
         if isinstance(amount_due, int):
             amount_due /= 100.0
         else:
             amount_due = 'Not Available'
+            
         return amount_due
 
     def get_client_secret(self):
-        client_secret = 'Not Available'
         payment_intent = self.response_data.get('payment_intent')
-        if payment_intent and isinstance(payment_intent, dict):
-            client_secret = payment_intent.get('client_secret', 'Not Available')
-        return client_secret
+        if isinstance(payment_intent, dict):
+            return payment_intent.get('client_secret', 'Not Available')
+        return 'Not Available'
 
     def get_secure_type(self):
         secure_type = '2d secure'
         payment_intent = self.response_data.get('payment_intent')
-        if payment_intent and isinstance(payment_intent, dict):
+        if isinstance(payment_intent, dict):
             last_payment_error = payment_intent.get('last_payment_error', {})
             payment_method = last_payment_error.get('payment_method', {})
             card = payment_method.get('card', {})
@@ -160,7 +179,8 @@ class StripeCheckoutInfo:
 async def start(client, message):
     welcome_text = (
         "👋 Hello! Welcome to the **Checkout Info Bot**!\n\n"
-        "I can help you retrieve detailed information from Stripe and other payment gateways. Just send me a checkout URL, and I'll process it for you! 😎\n\n"
+        "I can help you retrieve detailed information from Stripe and other payment gateways. "
+        "Just send me a checkout URL, and I'll process it for you! 😎\n\n"
         "🔍 Supported Links: Stripe, PayPal, and more!\n"
         "Use `/cs <checkout_url>` to start checking a checkout URL.\n"
         "For any questions, feel free to ask! 💬"
@@ -169,16 +189,19 @@ async def start(client, message):
 
 @app.on_message(filters.text & filters.regex(r"^(http|https)://"))
 async def handle_check_payment_gateways(client, message):
-
-    processing_message = await message.reply_text("**Processing your request...**", disable_web_page_preview=True)
+    processing_message = await message.reply_text(
+        "**Processing your request...**",
+        disable_web_page_preview=True
+    )
 
     start_time = time.time()
-
     url = message.text
     checkout_info = await StripeCheckoutInfo.create(url)
 
     if not checkout_info.pk or not checkout_info.urlx:
-        return await processing_message.edit_text("⚠️ Failed to retrieve the Stripe Publishable Key.")
+        return await processing_message.edit_text(
+            "⚠️ Failed to retrieve the Stripe Publishable Key."
+        )
 
     session_id = checkout_info.get_checkout_session()
     if session_id == 'Not Available':
@@ -188,43 +211,39 @@ async def handle_check_payment_gateways(client, message):
             f"🔗 **Checkout Link**: [Here]({checkout_info.urlx})\n\n"
             "**Status**: Checkout Expired 🕒"
         )
-        await processing_message.edit_text(reply_text, parse_mode=ParseMode.MARKDOWN)
+        await processing_message.edit_text(
+            reply_text,
+            parse_mode=ParseMode.MARKDOWN
+        )
         return
 
     amount_due = checkout_info.get_amount_due()
-    if amount_due != 'Not Available':
-        currency = checkout_info.get_checkout_currency()
-        amount_info = f"{amount_due} {currency}"
-    else:
-        amount_info = "Not Available"
-
-    checkout_url = checkout_info.urlx
-    checkout_type = checkout_info.get_secure_type()
-    checkout_session = session_id
-    checkout_pk = checkout_info.pk
-    checkout_secret = checkout_info.get_client_secret()
-    checkout_amount = amount_info
-    checkout_email = checkout_info.get_customer_email()
-    business_url = checkout_info.business_url
-    payment_mode = checkout_info.payment_mode
+    amount_info = (
+        f"{amount_due} {checkout_info.get_checkout_currency()}"
+        if amount_due != 'Not Available'
+        else "Not Available"
+    )
 
     elapsed_time = time.time() - start_time
-    elapsed_time_str = f"{elapsed_time:.2f} seconds"
-
+    
     reply_text = (
         "✅ **Stripe Checkout Info Retrieved!** ✅\n\n"
         f"🌐 **Business Name**: {checkout_info.site_name}\n"
-        f"🔗 **Checkout Link**: [Here]({checkout_url})\n"
-        f"🌍 **Business URL**: {business_url}\n\n"
-        f"💳 **Payment Mode**: `{payment_mode}`\n"
-        f"💳 **Checkout Type**: `{checkout_type}`\n"
-        f"🆔 **Session ID**: `{checkout_session}`\n"
-        f"🔑 **Publishable Key**: `{checkout_pk}`\n"
-        f"🔐 **Client Secret**: `{checkout_secret}`\n"
-        f"💰 **Amount Due**: `{checkout_amount}`\n"
-        f"📧 **Customer Email**: `{checkout_email}`\n\n"
-        f"⏱ **Response Time**: {elapsed_time_str}\n\n"
-        "💡 If you need more info, just let me know!"
+        f"🔗 **Checkout Link**: [Click Here]({checkout_info.urlx})\n"
+        f"🌍 **Business URL**: [Visit Site]({checkout_info.business_url})\n\n"
+        f"💳 **Payment Mode**: `{checkout_info.payment_mode}`\n"
+        f"💳 **Checkout Type**: `{checkout_info.get_secure_type()}`\n"
+        f"🆔 **Session ID**: `{session_id}`\n"
+        f"🔑 **Publishable Key**: `{checkout_info.pk}`\n"
+        f"🔐 **Client Secret**: `{checkout_info.get_client_secret()}`\n"
+        f"💰 **Amount Due**: `{amount_info}`\n"
+        f"📧 **Customer Email**: `{checkout_info.get_customer_email()}`\n\n"
+        f"⏱ **Response Time**: {elapsed_time:.2f} seconds\n\n" +
+        "💡 **Tips**:\n" +
+        "• Click the links above to visit the site\n" +
+        "• Copy values by tapping on them\n" +
+        "• Send another URL to check different checkout\n\n" +
+        "✨ Need help? Just ask!"
     )
 
     await processing_message.edit_text(
@@ -233,4 +252,5 @@ async def handle_check_payment_gateways(client, message):
         parse_mode=ParseMode.MARKDOWN
     )
 
-app.run()
+if __name__ == "__main__":
+    app.run()
