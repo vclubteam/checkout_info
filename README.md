@@ -30,7 +30,7 @@ cd checkout_info
 ```
 
 ## Example Response
-
+```
 ✅ **Stripe Checkout Info Retrieved!** ✅
 
 🌐 **Business Name**: Stripe
@@ -47,3 +47,4 @@ cd checkout_info
 
 💡 If you need more info, just let me know!
 
+```
