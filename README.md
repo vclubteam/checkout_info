@@ -26,3 +26,24 @@ Follow the steps below to install and run the bot:
 ```bash
 git clone https://github.com/vclubteam/checkout_info
 cd checkout_info
+
+```
+
+## Example Response
+
+✅ **Stripe Checkout Info Retrieved!** ✅
+
+🌐 **Business Name**: Stripe
+🔗 **Checkout Link**: [Here](https://checkout.stripe.com/c/pay/...)
+🌍 **Business URL**: https://stripe.com
+
+💳 **Payment Mode**: `Subscription`
+💳 **Checkout Type**: `2d secure`
+🆔 **Session ID**: `cs_live_a1raW7gwYNf1WLgggXOhQulJICsllSH0uZAa7v3oMNYJJUwqN4dzFtB2fy`
+🔑 **Publishable Key**: `pk_live_51HOrSwC6h1nxGoI3lTAgRjYVrz4dU3fVOabyCcKR3pbEJguCVAlqCxdxCUvoRh1XWwRacViovU3kLKvpkjh7IqkW00iXQsjo3n`
+🔐 **Client Secret**: `pi_1IYQkH2eZv6eRe42lfHqYmEd_secret_DdrPoK7QnddF2LaShz87r8l9g`
+💰 **Amount Due**: `50.00 USD`
+📧 **Customer Email**: `example@domain.com`
+
+💡 If you need more info, just let me know!
+
